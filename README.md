@@ -1,109 +1,92 @@
-<a href="https://demo-nextjs-with-supabase.vercel.app/">
-  <img alt="Next.js and Supabase Starter Kit - the fastest way to build apps with Next.js and Supabase" src="https://demo-nextjs-with-supabase.vercel.app/opengraph-image.png">
-  <h1 align="center">Next.js and Supabase Starter Kit</h1>
-</a>
+<h1 align="center">Nano Banana Creative Studio</h1>
 
-<p align="center">
- The fastest way to build apps with Next.js and Supabase
-</p>
-
-<p align="center">
-  <a href="#features"><strong>Features</strong></a> ·
-  <a href="#demo"><strong>Demo</strong></a> ·
-  <a href="#deploy-to-vercel"><strong>Deploy to Vercel</strong></a> ·
-  <a href="#clone-and-run-locally"><strong>Clone and run locally</strong></a> ·
-  <a href="#feedback-and-issues"><strong>Feedback and issues</strong></a>
-  <a href="#more-supabase-examples"><strong>More Examples</strong></a>
-</p>
-<br/>
+The internal demo app for generating ad assets with Gemini and storing everything in Supabase (auth, storage, metadata). This doc focuses on running the project locally and deploying it with the right environment and database/storage setup.
 
 ## Features
 
-- Works across the entire [Next.js](https://nextjs.org) stack
-  - App Router
-  - Pages Router
-  - Proxy
-  - Client
-  - Server
-  - It just works!
-- supabase-ssr. A package to configure Supabase Auth to use cookies
-- Password-based authentication block installed via the [Supabase UI Library](https://supabase.com/ui/docs/nextjs/password-based-auth)
-- Styling with [Tailwind CSS](https://tailwindcss.com)
-- Components with [shadcn/ui](https://ui.shadcn.com/)
-- Optional deployment with [Supabase Vercel Integration and Vercel deploy](#deploy-your-own)
-  - Environment variables automatically assigned to Vercel project
+- Next.js App Router with Supabase Auth (cookies via `@supabase/ssr`).
+- Google Gemini for ad copy, product photo variations, jingle/music, and Veo video generation.
+- Supabase Storage bucket `media-assets` plus `media_assets` table for asset metadata; signed URLs for secure delivery.
+- Saved sets page that lists all assets per saveId, plus local caching for quick reloads.
+- Tailwind + shadcn/ui components, light/dark theme switcher.
 
-## Demo
+## Prerequisites
 
-You can view a fully working demo at [demo-nextjs-with-supabase.vercel.app](https://demo-nextjs-with-supabase.vercel.app/).
+- Node 20+ and npm.
+- Supabase project (can be free tier).
+- Google AI Studio API key with access to Gemini and Veo (set `GEMINI_API_KEY`).
 
-## Deploy to Vercel
+## Environment variables
 
-Vercel deployment will guide you through creating a Supabase account and project.
+Create `.env.local` at the repo root:
 
-After installation of the Supabase integration, all relevant environment variables will be assigned to the project so the deployment is fully functioning.
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_anon_or_publishable_key
+GEMINI_API_KEY=your_google_ai_studio_key
+```
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&project-name=nextjs-with-supabase&repository-name=nextjs-with-supabase&demo-title=nextjs-with-supabase&demo-description=This+starter+configures+Supabase+Auth+to+use+cookies%2C+making+the+user%27s+session+available+throughout+the+entire+Next.js+app+-+Client+Components%2C+Server+Components%2C+Route+Handlers%2C+Server+Actions+and+Middleware.&demo-url=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2F&external-id=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&demo-image=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2Fopengraph-image.png)
+- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` come from Supabase Project Settings > API.
+- `GEMINI_API_KEY` is required for all AI routes; you can also expose it as `NEXT_PUBLIC_GEMINI_API_KEY` if needed, but keep it server-side when possible.
 
-The above will also clone the Starter kit to your GitHub, you can clone that locally and develop locally.
+## Supabase setup
 
-If you wish to just develop locally and not deploy to Vercel, [follow the steps below](#clone-and-run-locally).
+1) Create a private storage bucket named `media-assets` (Dashboard > Storage). Keep it private; the app uses signed URLs.
 
-## Clone and run locally
+2) Create the `media_assets` table (SQL editor):
 
-1. You'll first need a Supabase project which can be made [via the Supabase dashboard](https://database.new)
+```sql
+create table if not exists public.media_assets (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid references auth.users not null,
+  storage_path text not null,
+  file_name text,
+  media_type text check (media_type in ('image','video','audio')) not null,
+  mime_type text,
+  file_size_bytes bigint,
+  created_at timestamptz default now()
+);
 
-2. Create a Next.js app using the Supabase Starter template npx command
+alter table public.media_assets enable row level security;
 
-   ```bash
-   npx create-next-app --example with-supabase with-supabase-app
-   ```
+create policy "Owners can insert" on public.media_assets
+  for insert with check (auth.uid() = owner_id);
 
-   ```bash
-   yarn create next-app --example with-supabase with-supabase-app
-   ```
+create policy "Owners can select" on public.media_assets
+  for select using (auth.uid() = owner_id);
+```
 
-   ```bash
-   pnpm create next-app --example with-supabase with-supabase-app
-   ```
+3) (Optional but recommended) Allow authenticated users to manage objects in the `media-assets` bucket:
 
-3. Use `cd` to change into the app's directory
+```sql
+create policy if not exists "Authenticated can manage media-assets" on storage.objects
+  for all using (bucket_id = 'media-assets' and auth.role() = 'authenticated')
+  with check (bucket_id = 'media-assets' and auth.role() = 'authenticated');
+```
 
-   ```bash
-   cd with-supabase-app
-   ```
+## Run locally
 
-4. Rename `.env.example` to `.env.local` and update the following:
+```bash
+npm install
+npm run dev
+```
 
-  ```env
-  NEXT_PUBLIC_SUPABASE_URL=[INSERT SUPABASE PROJECT URL]
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=[INSERT SUPABASE PROJECT API PUBLISHABLE OR ANON KEY]
-  ```
-  > [!NOTE]
-  > This example uses `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, which refers to Supabase's new **publishable** key format.
-  > Both legacy **anon** keys and new **publishable** keys can be used with this variable name during the transition period. Supabase's dashboard may show `NEXT_PUBLIC_SUPABASE_ANON_KEY`; its value can be used in this example.
-  > See the [full announcement](https://github.com/orgs/supabase/discussions/29260) for more information.
+- App runs at http://localhost:3000.
+- Sign up/login with Supabase Auth; all asset operations require an authenticated user.
 
-  Both `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` can be found in [your Supabase project's API settings](https://supabase.com/dashboard/project/_?showConnect=true)
+## Useful scripts
 
-5. You can now run the Next.js local development server:
+- `npm run dev` — start Next.js in dev mode.
+- `npm run lint` — run ESLint.
+- `npm run build` / `npm run start` — production build and serve.
 
-   ```bash
-   npm run dev
-   ```
+## Deploy
 
-   The starter kit should now be running on [localhost:3000](http://localhost:3000/).
+- Vercel works out of the box: set the env vars above and connect your Supabase project (or manually provision the bucket/table/policies).
+- Other hosts: run `npm run build` and `npm run start` behind your preferred process manager; ensure env vars are present.
 
-6. This template comes with the default shadcn/ui style initialized. If you instead want other ui.shadcn styles, delete `components.json` and [re-install shadcn/ui](https://ui.shadcn.com/docs/installation/next)
+## Troubleshooting
 
-> Check out [the docs for Local Development](https://supabase.com/docs/guides/getting-started/local-development) to also run Supabase locally.
-
-## Feedback and issues
-
-Please file feedback and issues over on the [Supabase GitHub org](https://github.com/supabase/supabase/issues/new/choose).
-
-## More Supabase examples
-
-- [Next.js Subscription Payments Starter](https://github.com/vercel/nextjs-subscription-payments)
-- [Cookie-based Auth and the Next.js 13 App Router (free course)](https://youtube.com/playlist?list=PL5S4mPUpp4OtMhpnp93EFSo42iQ40XjbF)
-- [Supabase Auth and the Next.js App Router](https://github.com/supabase/supabase/tree/master/examples/auth/nextjs)
+- Missing bucket/table errors: create the `media-assets` bucket and `media_assets` table with the SQL above.
+- 401s on save/list: confirm you are signed in and policies are applied.
+- Gemini errors: verify `GEMINI_API_KEY` exists and has access to the requested model (Gemini, Veo, or Lyria).

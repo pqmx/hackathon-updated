@@ -7,7 +7,7 @@ type AssetRow = {
   id: string;
   storage_path: string;
   file_name: string;
-  media_type: "image" | "video";
+  media_type: "image" | "video" | "audio";
   mime_type: string | null;
   file_size_bytes: number | null;
 };
@@ -16,6 +16,7 @@ type SetPayload = {
   saveId: string;
   adCopy: string;
   seoKeywords: string;
+  adAudioText?: string;
   assets: Array<AssetRow & { signed_url: string }>;
 };
 
@@ -75,6 +76,7 @@ export async function GET(request: Request) {
     entries.map(async ([saveId, assets]) => {
       let adCopy = "";
       let seoKeywords = "";
+      let adAudioText = "";
 
       try {
         const metaPath = `${user.id}/${saveId}/meta.json`;
@@ -87,6 +89,7 @@ export async function GET(request: Request) {
           const parsed = JSON.parse(metaText);
           adCopy = parsed?.adCopy ?? "";
           seoKeywords = parsed?.seoKeywords ?? "";
+          adAudioText = parsed?.adAudioText ?? "";
         } else if (metaError) {
           const msg = metaError.message.toLowerCase();
           if (msg.includes("not found") || msg.includes("bucket")) {
@@ -104,7 +107,7 @@ export async function GET(request: Request) {
         })),
       );
 
-      return { saveId, adCopy, seoKeywords, assets: assetsWithUrls };
+      return { saveId, adCopy, seoKeywords, adAudioText, assets: assetsWithUrls };
     }),
   );
 
