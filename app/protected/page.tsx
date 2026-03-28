@@ -38,7 +38,7 @@ export default function ProtectedPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Link href="/protected/products">
+            <Link href="/protected/set">
               <Button variant="ghost" className="gap-2 rounded-xl border border-border/60" size="sm">
                 Your product prompts
               </Button>

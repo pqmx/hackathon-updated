@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Space_Grotesk } from "next/font/google";
-import { ThemeProvider } from "next-themes";
+import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 const defaultUrl = process.env.VERCEL_URL
@@ -27,12 +27,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${grotesk.className} antialiased`}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="light"
-          enableSystem={false}
-          disableTransitionOnChange
-        >
+        <ThemeProvider defaultTheme="light">
           <div className="relative min-h-screen bg-background text-foreground">
             <div
               className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_15%_18%,rgba(255,199,141,0.28),transparent_36%),radial-gradient(circle_at_82%_16%,rgba(147,197,253,0.26),transparent_34%),radial-gradient(circle_at_28%_86%,rgba(244,114,182,0.22),transparent_30%)]"

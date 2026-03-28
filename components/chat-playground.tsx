@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ImageIcon, Paperclip, Send, Sparkles, Wand2, X } from "lucide-react";
 
@@ -23,7 +24,7 @@ type Attachment = {
   file: File;
 };
 
-type Stage = "photo" | "ad" | "seo" | "saved";
+type Stage = "photo" | "ad" | "seo" | "jingle" | "saved";
 
 type FavoriteImage = {
   id: string;
@@ -55,7 +56,17 @@ export function ChatPlayground() {
   const [seoKeywords, setSeoKeywords] = useState("");
   const [adVideo, setAdVideo] = useState<{ uri: string | null; file: string | null; status: string | null } | null>(null);
   const [adAudio, setAdAudio] = useState<{ url: string; mimeType: string; text?: string } | null>(null);
-  const [savedSet, setSavedSet] = useState<{ images: FavoriteImage[]; ad: string; seo: string } | null>(null);
+  const [savedRemoteSet, setSavedRemoteSet] = useState<
+    | {
+        saveId: string;
+        adCopy: string;
+        seoKeywords: string;
+        assets: { id: string; media_type: "image" | "video"; mime_type: string | null; signed_url: string; file_name: string }[];
+      }
+    | null
+  >(null);
+  const [isGeneratingJingle, setIsGeneratingJingle] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const idRef = useRef(1);
   const baseTimestampRef = useRef(0);
   const tsCounterRef = useRef(0);
@@ -293,6 +304,80 @@ export function ChatPlayground() {
     [favorites, nextId, nextTimestamp],
   );
 
+  const base64ToUrl = useCallback((base64: string, mimeType: string) => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: mimeType });
+    return URL.createObjectURL(blob);
+  }, []);
+
+  const blobUrlToFile = useCallback(async (uri: string, fallbackName: string, fallbackType: string) => {
+    const res = await fetch(uri);
+    if (!res.ok) throw new Error("Failed to load media blob");
+    const blob = await res.blob();
+    const type = blob.type || fallbackType;
+    return new File([blob], fallbackName, { type });
+  }, []);
+
+  const generateJingle = useCallback(
+    async (notes?: string) => {
+      if (!adCopy && !notes) return;
+      try {
+        setIsGeneratingJingle(true);
+
+        const response = await fetch("/api/nano-banana/jingle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            productName: lastPromptRef.current || "Product",
+            productDescription: notes || adCopy || "",
+            tone: "upbeat and catchy",
+            duration: 30,
+          }),
+        });
+
+        const payload = await response.json();
+        if (!response.ok || !payload?.success) {
+          const detail = payload?.error || "Could not generate jingle";
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: nextId(),
+              role: "assistant",
+              text: detail,
+              images: [],
+              timestamp: nextTimestamp(),
+            },
+          ]);
+          return;
+        }
+
+        const audioBase64 = payload.jingle?.audioBase64;
+        const lyrics = payload.jingle?.lyrics ?? "";
+        if (audioBase64) {
+          const url = base64ToUrl(audioBase64, "audio/mpeg");
+          setAdAudio({ url, mimeType: "audio/mpeg", text: lyrics });
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: nextId(),
+              role: "assistant",
+              text: "Jingle ready to preview.",
+              images: [],
+              timestamp: nextTimestamp(),
+            },
+          ]);
+        }
+      } finally {
+        setIsGeneratingJingle(false);
+      }
+    },
+    [adCopy, base64ToUrl, nextId, nextTimestamp],
+  );
+
   useEffect(() => {
     if (stage === "seo" && favorites.length > 0 && adCopy && !seoKeywords && !isGeneratingSeo) {
       generateSeo();
@@ -332,6 +417,7 @@ export function ChatPlayground() {
         if (stage === "photo" && !trimmed && attachments.length === 0) return;
         if (stage === "ad" && favorites.length === 0) return;
         if (stage === "seo" && favorites.length === 0) return;
+        if (stage === "jingle" && !adCopy && !trimmed) return;
 
         lastPromptRef.current = trimmed;
 
@@ -466,10 +552,12 @@ export function ChatPlayground() {
             await generateAd(trimmed);
           } else if (stage === "seo") {
             await generateSeo(trimmed);
+          } else if (stage === "jingle") {
+            await generateJingle(trimmed);
           }
       }
     },
-    [attachments, favorites.length, generateAd, generateSeo, input, nextId, nextTimestamp, stage],
+    [attachments, favorites.length, generateAd, generateJingle, generateSeo, input, nextId, nextTimestamp, stage],
   );
 
   const removeAttachment = useCallback((id: string) => {
@@ -485,7 +573,9 @@ export function ChatPlayground() {
       ? input.trim().length > 0 || attachments.length > 0 || !!lastImageRef.current
       : stage === "ad" || stage === "seo"
         ? favorites.length > 0
-        : false;
+        : stage === "jingle"
+          ? Boolean(adCopy || input.trim())
+          : false;
 
   const toggleFavorite = (url: string, sourceMessageId: string) => {
     setFavorites((prev) => {
@@ -496,24 +586,108 @@ export function ChatPlayground() {
     });
   };
 
-  const handleSave = () => {
-    setSavedSet({ images: favorites, ad: adCopy, seo: seoKeywords });
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: nextId(),
-        role: "assistant",
-        text: "Saved your set (5 picks max), ad, and SEO notes.",
-        images: favorites.map((f) => f.url),
-        timestamp: nextTimestamp(),
-      },
-    ]);
-  };
+  const handleSave = useCallback(async () => {
+    if (favorites.length === 0) return;
+    try {
+      setIsSaving(true);
+
+      const formData = new FormData();
+      formData.append("adCopy", adCopy || "");
+      formData.append("seoKeywords", seoKeywords || "");
+
+      // Attach all pinned photoshoot favorites.
+      const favoriteImages = await Promise.all(
+        favorites.map(async (fav, index) => {
+          const name = `ad-image-${index + 1}.jpg`;
+          return blobUrlToFile(fav.url, name, "image/jpeg");
+        }),
+      );
+      favoriteImages.forEach((file) => formData.append("images", file));
+
+      if (adVideo?.status === "ready" && adVideo.uri) {
+        const videoFile = await blobUrlToFile(adVideo.uri, "ad-video.mp4", "video/mp4");
+        formData.append("video", videoFile);
+      }
+
+      if (adAudio?.url) {
+        const audioFile = await blobUrlToFile(adAudio.url, "ad-audio.mp3", adAudio.mimeType || "audio/mpeg");
+        formData.append("audio", audioFile);
+        if (adAudio.text) {
+          formData.append("adAudioText", adAudio.text);
+        }
+      }
+
+      const response = await fetch("/api/nano-banana/save", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        const message = detail?.error || "Could not save set.";
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextId(),
+            role: "assistant",
+            text: message,
+            images: [],
+            timestamp: nextTimestamp(),
+          },
+        ]);
+        return;
+      }
+
+      const result = await response.json();
+
+      if (typeof window !== "undefined") {
+        try {
+          const existingRaw = localStorage.getItem("nano-saved-sets");
+          const existing = existingRaw ? (JSON.parse(existingRaw) as any[]) : [];
+          const nextSets = Array.isArray(existing) ? existing : [];
+          const deduped = [result, ...nextSets.filter((set: any) => set?.saveId !== result.saveId)];
+          localStorage.setItem("nano-saved-sets", JSON.stringify(deduped.slice(0, 10)));
+          localStorage.setItem("nano-saved-set", JSON.stringify(result));
+        } catch (_) {
+          localStorage.setItem("nano-saved-sets", JSON.stringify([result]));
+          localStorage.setItem("nano-saved-set", JSON.stringify(result));
+        }
+      }
+
+      setSavedRemoteSet(result);
+      setStage("saved");
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: nextId(),
+          role: "assistant",
+          text: "Saved your set (media uploaded).",
+          images: favorites.map((f) => f.url),
+          timestamp: nextTimestamp(),
+        },
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save set.";
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: nextId(),
+          role: "assistant",
+          text: message,
+          images: [],
+          timestamp: nextTimestamp(),
+        },
+      ]);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [adAudio?.mimeType, adAudio?.text, adAudio?.url, adCopy, adVideo?.status, adVideo?.uri, blobUrlToFile, favorites, nextId, nextTimestamp, seoKeywords]);
 
   const placeholderByStage: Record<Stage, string> = {
     photo: "Describe the photoshoot scene and drop product shots (limit 3 generations)",
     ad: "Add a short tweak for the ad (optional)",
     seo: "Add context for SEO keywords (optional)",
+    jingle: "Add a vibe or lyric hint (optional)",
     saved: "All done",
   };
 
@@ -540,11 +714,12 @@ export function ChatPlayground() {
       <CardContent className="relative">
         <div className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
-              {["photo", "ad", "seo"].map((step, index) => {
+              {(["photo", "ad", "seo", "jingle"] as Stage[]).map((step, index) => {
                 const labels = {
                   photo: { title: "Photoshoot", helper: "Post your product" },
                   ad: { title: "Ad", helper: "Generate your ad (2 attempts)" },
                   seo: { title: "SEO", helper: "Keywords + finalize" },
+                  jingle: { title: "Jingle", helper: "Audio spot" },
                 } as const;
                 const config = labels[step as keyof typeof labels];
                 return (
@@ -680,6 +855,16 @@ export function ChatPlayground() {
                           onClick={() => setStage("seo")}
                         >
                           Proceed to SEO
+                        </Button>
+                      )}
+                      {stage === "seo" && adCopy && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setStage("jingle")}
+                        >
+                          Proceed to jingle
                         </Button>
                       )}
                     </div>
@@ -842,14 +1027,37 @@ export function ChatPlayground() {
                       type="button"
                       size="sm"
                       variant="secondary"
-                      disabled={favorites.length === 0 || (!adCopy && !seoKeywords)}
+                      disabled={favorites.length === 0 || (!adCopy && !seoKeywords) || isSaving}
                       onClick={() => {
                         handleSave();
-                        setStage("saved");
                       }}
                     >
-                      Save set
+                      {isSaving ? "Saving…" : "Save set"}
                     </Button>
+                  )}
+                  {stage === "jingle" && (
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={isGeneratingJingle || !adCopy}
+                        onClick={() => generateJingle(input.trim() || undefined)}
+                      >
+                        {isGeneratingJingle ? "Generating jingle…" : "Generate jingle"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={favorites.length === 0 || (!adCopy && !seoKeywords) || isSaving}
+                        onClick={() => {
+                          handleSave();
+                        }}
+                      >
+                        {isSaving ? "Saving…" : "Save set"}
+                      </Button>
+                    </>
                   )}
                 </div>
               </form>
@@ -858,42 +1066,42 @@ export function ChatPlayground() {
         </div>
       </CardContent>
 
-      {(adCopy || seoKeywords || savedSet) && (
-        <div className="border-t border-border/60 bg-background/70 px-6 py-4 text-sm">
+      {(adCopy || seoKeywords || adAudio || adVideo || savedRemoteSet) && (
+        <div className="border-t border-border/60 bg-background/70 px-4 py-3 text-sm">
           <div className="grid gap-3 md:grid-cols-2">
             {adCopy && (
-              <div className="rounded-xl border border-border/60 bg-card/70 p-3">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Ad draft</p>
-                <p className="mt-2 whitespace-pre-line leading-relaxed">{adCopy}</p>
+              <div className="rounded-lg border border-border/60 bg-card/70 p-2.5">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Ad draft</p>
+                <p className="mt-1 whitespace-pre-line leading-relaxed text-sm">{adCopy}</p>
               </div>
             )}
             {seoKeywords && (
-              <div className="rounded-xl border border-border/60 bg-card/70 p-3">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">SEO keywords</p>
-                <p className="mt-2 whitespace-pre-line leading-relaxed">{seoKeywords}</p>
+              <div className="rounded-lg border border-border/60 bg-card/70 p-2.5">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">SEO keywords</p>
+                <p className="mt-1 whitespace-pre-line leading-relaxed text-sm">{seoKeywords}</p>
               </div>
             )}
             {adAudio && (
-              <div className="rounded-xl border border-border/60 bg-card/70 p-3">
-                <div className="flex items-center justify-between text-xs uppercase tracking-wide text-muted-foreground">
-                  <span>Ad music (clean bed)</span>
-                  <span className="text-[11px] text-muted-foreground">15s</span>
+              <div className="rounded-lg border border-border/60 bg-card/70 p-2.5">
+                <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <span>Jingle</span>
+                  <Link href="/protected/set" className="font-semibold text-primary hover:underline">Saved set</Link>
                 </div>
-                <audio className="mt-2 w-full" controls src={adAudio.url} />
+                <audio className="mt-1 w-full" controls src={adAudio.url} />
                 {adAudio.text && (
-                  <p className="mt-2 text-xs text-muted-foreground">{adAudio.text}</p>
+                  <p className="mt-1 text-[12px] text-muted-foreground">{adAudio.text}</p>
                 )}
               </div>
             )}
             {adVideo && (
-              <div className="rounded-xl border border-border/60 bg-card/70 p-3 md:col-span-2">
-                <div className="flex items-center justify-between text-xs uppercase tracking-wide text-muted-foreground">
+              <div className="rounded-lg border border-border/60 bg-card/70 p-2.5 md:col-span-2">
+                <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
                   <span>Ad video</span>
                   <span className="text-[11px] font-semibold text-primary">{adVideo.status ?? "pending"}</span>
                 </div>
                 {adVideo.status === "ready" && adVideo.uri ? (
-                  <div className="mt-3 flex flex-col items-center gap-2">
-                    <div className="relative aspect-[9/16] w-full max-w-[280px] overflow-hidden rounded-2xl border-2 border-primary/20 bg-black shadow-xl">
+                  <div className="mt-2 flex flex-col items-center gap-2">
+                    <div className="relative aspect-[9/16] w-full max-w-[260px] overflow-hidden rounded-xl border border-primary/20 bg-black shadow-lg">
                       <video
                         src={adVideo.uri}
                         controls
@@ -905,33 +1113,84 @@ export function ChatPlayground() {
                     <a
                       href={adVideo.uri}
                       download="ad-video.mp4"
-                      className="flex items-center gap-2 text-xs font-medium text-primary hover:underline"
+                      className="text-[12px] font-semibold text-primary hover:underline"
                     >
-                      Download MP4
+                      Download video
                     </a>
                   </div>
                 ) : (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Video is processing{adVideo.file ? ` (file: ${adVideo.file})` : "."}
-                  </p>
+                  <div className="mt-2 rounded-lg border border-dashed border-border/70 bg-background/80 p-3 text-center text-[12px] text-muted-foreground">
+                    Video pending
+                  </div>
                 )}
               </div>
             )}
-            {savedSet && (
-              <div className="rounded-xl border border-primary/50 bg-primary/5 p-3 md:col-span-2">
-                <div className="flex items-center justify-between text-xs text-primary">
+            {savedRemoteSet && (
+              <div className="rounded-lg border border-primary/40 bg-primary/5 p-2.5 md:col-span-2">
+                <div className="flex items-center justify-between text-[11px] text-primary">
                   <span className="font-semibold">Saved set</span>
-                  <span>{savedSet.images.length} shots</span>
+                  <span className="font-mono text-[10px] text-primary/80">{savedRemoteSet.saveId}</span>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {savedSet.images.map((img) => (
-                    <img
-                      key={img.id}
-                      src={img.url}
-                      alt="Saved"
-                      className="h-14 w-14 rounded-lg border border-primary/50 object-cover"
-                    />
-                  ))}
+                <div className="mt-1 flex items-center gap-2 text-[11px] text-primary/80">
+                  <Link href="/protected/set" className="font-semibold hover:underline">View saved page</Link>
+                  <span aria-hidden>·</span>
+                  <span>Signed links expire ~24h.</span>
+                </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  {savedRemoteSet.assets
+                    .filter((asset) => asset.media_type === "video")
+                    .map((asset) => (
+                      <div key={asset.id} className="rounded-lg border border-primary/30 bg-black/70 p-2 shadow">
+                        <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-primary/70">
+                          <span>Video</span>
+                          <span className="truncate text-[10px] text-primary/80">{asset.file_name}</span>
+                        </div>
+                        <div className="relative mt-1 aspect-[9/16] overflow-hidden rounded-md border border-primary/30 bg-black">
+                          <video
+                            src={asset.signed_url}
+                            controls
+                            playsInline
+                            className="h-full w-full object-cover"
+                          />
+                        </div>
+                        <div className="mt-1 flex items-center justify-between text-[10px] text-primary/80">
+                          <span className="truncate">{asset.file_name}</span>
+                          <a
+                            href={asset.signed_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-semibold hover:underline"
+                          >
+                            Open
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  {savedRemoteSet.assets
+                    .filter((asset) => asset.media_type === "image")
+                    .map((asset) => (
+                      <div key={asset.id} className="rounded-lg border border-primary/30 bg-white/5 p-2 shadow">
+                        <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-primary/70">
+                          <span>Image</span>
+                          <span className="truncate text-[10px] text-primary/80">{asset.file_name}</span>
+                        </div>
+                        <div className="mt-1 overflow-hidden rounded-md border border-primary/20 bg-background">
+                          <img
+                            src={asset.signed_url}
+                            alt={asset.file_name}
+                            className="h-auto w-full object-cover"
+                          />
+                        </div>
+                        <a
+                          href={asset.signed_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-primary hover:underline"
+                        >
+                          Open
+                        </a>
+                      </div>
+                    ))}
                 </div>
               </div>
             )}
