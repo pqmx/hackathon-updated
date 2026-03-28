@@ -1,0 +1,9 @@
+intention to create a product that combines picture, video, and music for an app. The process involves calling nano to generate a picture, veo to generate a video, and lyria to create music appropriate for the app. Finally, these files will be combined together to create a product description for the app.
+replaces whole
+
+call nano and generate a product of picture on app
+call veo and generate a product of video on app 
+-> call lyria to create music paporpoiate for app and then combine tehse 2 files together.
+-> return a product description fo the product.
+
+

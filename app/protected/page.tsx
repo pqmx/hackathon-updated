@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
-import { InfoIcon } from "lucide-react";
-import { FetchDataSteps } from "@/components/tutorial/fetch-data-steps";
 import { Suspense } from "react";
+import { InfoIcon, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { ChatPlayground } from "@/components/chat-playground";
 
 async function UserDetails() {
   const supabase = await createClient();
@@ -18,26 +20,38 @@ async function UserDetails() {
 
 export default function ProtectedPage() {
   return (
-    <div className="flex-1 w-full flex flex-col gap-12">
-      <div className="w-full">
-        <div className="bg-accent text-sm p-3 px-5 rounded-md text-foreground flex gap-3 items-center">
-          <InfoIcon size="16" strokeWidth={2} />
-          This is a protected page that you can only see as an authenticated
-          user
+    <div className="flex-1 w-full flex flex-col gap-10">
+      <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-r from-primary/10 via-background to-secondary/10 px-6 py-5 shadow-lg">
+        <div className="absolute inset-0 opacity-60" aria-hidden>
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_10%_10%,rgba(110,231,183,0.25),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(192,132,252,0.25),transparent_32%)]" />
+        </div>
+        <div className="relative flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3 text-sm text-foreground">
+            <div className="mt-1 rounded-full bg-primary/15 p-2 text-primary">
+              <InfoIcon size="16" strokeWidth={2} />
+            </div>
+            <div className="space-y-1">
+              <p className="text-base font-semibold">Protected workspace</p>
+              <p className="text-muted-foreground">
+                Authenticated users can experiment with a ready-to-ship chat canvas, image attachments, and live UI polish.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Link href="/protected/products">
+              <Button variant="ghost" className="gap-2 rounded-xl border border-border/60" size="sm">
+                Your product prompts
+              </Button>
+            </Link>
+            <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/80 px-3 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              You are in
+            </div>
+          </div>
         </div>
       </div>
-      <div className="flex flex-col gap-2 items-start">
-        <h2 className="font-bold text-2xl mb-4">Your user details</h2>
-        <pre className="text-xs font-mono p-3 rounded border max-h-32 overflow-auto">
-          <Suspense>
-            <UserDetails />
-          </Suspense>
-        </pre>
-      </div>
-      <div>
-        <h2 className="font-bold text-2xl mb-4">Next steps</h2>
-        <FetchDataSteps />
-      </div>
+
+      <ChatPlayground />
     </div>
   );
 }

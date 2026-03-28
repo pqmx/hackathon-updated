@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Space_Grotesk } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
@@ -9,12 +9,12 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "Next.js and Supabase Starter Kit",
-  description: "The fastest way to build apps with Next.js and Supabase",
+  title: "Helio Studio",
+  description: "A luminous workspace for AI-powered product storytelling.",
 };
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const grotesk = Space_Grotesk({
+  variable: "--font-grotesk",
   display: "swap",
   subsets: ["latin"],
 });
@@ -26,14 +26,24 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.className} antialiased`}>
+      <body className={`${grotesk.className} antialiased`}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
+          defaultTheme="light"
+          enableSystem={false}
           disableTransitionOnChange
         >
-          {children}
+          <div className="relative min-h-screen bg-background text-foreground">
+            <div
+              className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_15%_18%,rgba(255,199,141,0.28),transparent_36%),radial-gradient(circle_at_82%_16%,rgba(147,197,253,0.26),transparent_34%),radial-gradient(circle_at_28%_86%,rgba(244,114,182,0.22),transparent_30%)]"
+              aria-hidden
+            />
+            <div
+              className="pointer-events-none fixed inset-0 bg-[conic-gradient(from_120deg_at_25%_25%,rgba(255,255,255,0.14),rgba(255,255,255,0)_30%),linear-gradient(110deg,rgba(255,255,255,0.12)_0%,rgba(255,255,255,0)_45%,rgba(255,255,255,0.16)_80%)] mix-blend-screen"
+              aria-hidden
+            />
+            <div className="relative">{children}</div>
+          </div>
         </ThemeProvider>
       </body>
     </html>
