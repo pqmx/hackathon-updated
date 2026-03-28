@@ -1,4 +1,4 @@
-<h1 align="center">Nano Banana Creative Studio</h1>
+<h1 align="center">TrendLabs</h1>
 
 The internal demo app for generating ad assets with Gemini and storing everything in Supabase (auth, storage, metadata). This doc focuses on running the project locally and deploying it with the right environment and database/storage setup.
 
